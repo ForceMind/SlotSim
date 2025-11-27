@@ -81,6 +81,25 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Debug Log Section -->
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <a class="btn btn-link p-0 text-decoration-none text-danger" data-bs-toggle="collapse" href="#debugSection" role="button">
+                            ▼ 调试日志 (Debug Log)
+                        </a>
+                    </div>
+                </div>
+                <div class="collapse mt-2" id="debugSection">
+                    <div class="card card-body bg-light">
+                        <div class="d-flex justify-content-between mb-2">
+                            <h6 class="text-danger">System Logs</h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('debugLog').innerHTML=''">Clear</button>
+                        </div>
+                        <pre id="debugLog" style="max-height: 200px; overflow-y: auto; font-size: 0.8rem; background: #fff; padding: 10px; border: 1px solid #ccc;"></pre>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -221,6 +240,15 @@
     </div>
 
     <script>
+        function log(msg, type='info') {
+            const logEl = document.getElementById('debugLog');
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'red' : (type === 'warn' ? 'orange' : 'black');
+            logEl.innerHTML += `<div style="color:${color}">[${time}] ${msg}</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${msg}`);
+        }
+
         // --- Slot Machine Logic (Ported from Python) ---
         class SlotMachine {
             constructor(wildId) {
@@ -239,6 +267,7 @@
             }
 
             async loadData(files) {
+                log("Starting to load data files...", 'info');
                 // files: { payout: File, reel: File, line: File, freeReel: File }
                 
                 const readExcel = (file) => {
@@ -258,6 +287,7 @@
                 };
 
                 // 1. Load WinLines
+                log(`Reading WinLine file: ${files.line.name}`);
                 const lineData = await readExcel(files.line);
                 // Python: header=1 (row 0 ignored, row 1 header). Data starts row 2.
                 // JS array: index 0 is row 1, index 1 is row 2.
@@ -269,7 +299,10 @@
                         break;
                     }
                 }
-                if (headerIdx === -1) throw new Error("Invalid WinLine file: 'Line' column not found.");
+                if (headerIdx === -1) {
+                    log("Error: 'Line' column not found in WinLine file.", 'error');
+                    throw new Error("Invalid WinLine file: 'Line' column not found.");
+                }
                 
                 for(let i = headerIdx + 1; i < lineData.length; i++) {
                     const row = lineData[i];
@@ -285,9 +318,11 @@
                     } catch(e) {}
                 }
                 this.numWinLines = this.winLines.length;
+                log(`Loaded ${this.numWinLines} win lines.`);
                 if(this.numWinLines === 0) throw new Error("No valid win lines found.");
 
                 // 2. Load Payout
+                log(`Reading Payout file: ${files.payout.name}`);
                 const payoutData = await readExcel(files.payout);
                 headerIdx = -1;
                 for(let i=0; i<Math.min(5, payoutData.length); i++) {
@@ -296,10 +331,14 @@
                         break;
                     }
                 }
-                if (headerIdx === -1) throw new Error("Invalid Payout file: 'Id' column not found.");
+                if (headerIdx === -1) {
+                    log("Error: 'Id' column not found in Payout file.", 'error');
+                    throw new Error("Invalid Payout file: 'Id' column not found.");
+                }
                 
                 const headers = payoutData[headerIdx];
                 const idIdx = headers.indexOf('Id');
+                let payoutCount = 0;
                 
                 for(let i = headerIdx + 1; i < payoutData.length; i++) {
                     const row = payoutData[i];
@@ -315,20 +354,55 @@
                         const colIdx = headers.indexOf(colName);
                         if(colIdx !== -1) {
                             const val = parseFloat(row[colIdx]);
-                            if(!isNaN(val)) {
+                            if(!isNaN(val) && val > 0) {
                                 this.payoutTable[symId][count] = val / this.numWinLines;
                             }
                         }
                     }
+                    payoutCount++;
                 }
+                log(`Loaded payouts for ${payoutCount} symbols.`);
 
                 // 3. Load Reels
+                log(`Reading Reel file: ${files.reel.name}`);
                 await this._loadReels(files.reel, this.reels, this.reelWeights, this.totalWeights, readExcel);
                 
                 // 4. Load Free Reels
                 if(files.freeReel) {
+                    log(`Reading Free Reel file: ${files.freeReel.name}`);
                     await this._loadReels(files.freeReel, this.freeReels, this.freeReelWeights, this.freeTotalWeights, readExcel);
                 }
+
+                // --- Validation ---
+                this._validateData();
+            }
+
+            _validateData() {
+                log("Validating data consistency...", 'info');
+                const payoutSyms = new Set(Object.keys(this.payoutTable).map(Number));
+                const reelSyms = new Set();
+                
+                this.reels.forEach(reel => reel.forEach(s => reelSyms.add(s)));
+                if(this.freeReels.length > 0) {
+                    this.freeReels.forEach(reel => reel.forEach(s => reelSyms.add(s)));
+                }
+
+                // Check if all reel symbols have payouts (warning only, maybe some are blockers)
+                const missingPayout = [...reelSyms].filter(s => !payoutSyms.has(s));
+                if(missingPayout.length > 0) {
+                    log(`Warning: Symbols in reels without payout info: ${missingPayout.join(', ')}`, 'warn');
+                } else {
+                    log("All reel symbols have entries in payout table.");
+                }
+
+                // Check if Wild ID exists in reels
+                if(this.wildId !== null && !reelSyms.has(this.wildId)) {
+                    log(`Warning: Wild ID ${this.wildId} configured but not found in reels!`, 'warn');
+                }
+                
+                // Check if Scatter ID exists (we don't have scatter ID in class yet, passed in runSimulation)
+                // We can check if any symbol has NO payout but is in reels (potential scatter/bonus)
+                log("Data validation complete.");
             }
 
             async _loadReels(file, reelsList, weightsList, totalWeightsList, readExcelFn) {
@@ -340,9 +414,13 @@
                         break;
                     }
                 }
-                if (headerIdx === -1) throw new Error("Invalid Reel file: 'Reels1' column not found.");
+                if (headerIdx === -1) {
+                    log(`Error: 'Reels1' column not found in ${file.name}`, 'error');
+                    throw new Error("Invalid Reel file: 'Reels1' column not found.");
+                }
                 
                 const headers = data[headerIdx];
+                log(`Found headers in ${file.name}: ${headers.join(', ')}`);
                 
                 for(let r=1; r<=this.numReels; r++) {
                     const reelCol = `Reels${r}`;
@@ -350,7 +428,10 @@
                     const rIdx = headers.indexOf(reelCol);
                     const wIdx = headers.indexOf(weightCol);
                     
-                    if(rIdx === -1) break;
+                    if(rIdx === -1) {
+                        log(`Warning: Column ${reelCol} not found. Stopping reel load at Reel ${r-1}.`, 'warn');
+                        break;
+                    }
                     
                     const symbols = [];
                     const weights = [];
@@ -373,6 +454,7 @@
                     reelsList.push(symbols);
                     weightsList.push(weights);
                     totalWeightsList.push(totalW);
+                    log(`Loaded Reel ${r}: ${symbols.length} symbols, Total Weight: ${totalW}`);
                 }
             }
 
@@ -488,11 +570,14 @@
                     if(!symbolWinAmounts[sym]) symbolWinAmounts[sym] = 0;
                 };
 
+                log(`Starting simulation: ${numSpins} spins...`);
+
                 for(let i=0; i<numSpins; i++) {
                     let forceWin = false;
                     if(pityStreakThreshold > 0 && currentLosingStreak >= pityStreakThreshold) {
                         forceWin = true;
                         pityActivationsCount++;
+                        if(i < 5) log(`Spin ${i+1}: Pity forced win triggered.`);
                     }
                     
                     let screen, winMultiplier, details;
@@ -505,6 +590,18 @@
                         winMultiplier = winRes.totalWin;
                         details = winRes.winDetails;
                         
+                        // Debug log for first 5 spins
+                        if(i < 5) {
+                            const screenStr = screen.map(row => row.join('\t')).join('\n');
+                            log(`Spin ${i+1} Screen:\n${screenStr}`);
+                            if(details.length > 0) {
+                                const winsStr = details.map(d => `Line ${d.lineIndex}: Sym ${d.symbol} x${d.count} = ${d.win.toFixed(2)}`).join('\n');
+                                log(`Spin ${i+1} Wins:\n${winsStr}`);
+                            } else {
+                                log(`Spin ${i+1}: No Win`);
+                            }
+                        }
+
                         let fsTotalWin = 0.0;
                         let fsTriggered = false;
                         
@@ -519,6 +616,8 @@
                             if(scatterCount >= fsTriggerCount) {
                                 fsTriggered = true;
                                 fsTriggersCount++;
+                                if(i < 5) log(`Spin ${i+1}: Free Spins Triggered! (${scatterCount} scatters)`);
+                                
                                 let fsLeft = fsAwardCount;
                                 while(fsLeft > 0) {
                                     const fsRes = this.spin(true);
