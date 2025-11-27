@@ -201,6 +201,7 @@ class SlotMachine:
         
         win_amounts = []
         balance_history = [] # Track balance over time (assuming starting balance 0)
+        rtp_history = [] # Track RTP over time
         current_balance = 0.0
         
         # Strategy State
@@ -274,6 +275,11 @@ class SlotMachine:
             # Record balance every 100 spins to save data size for chart
             if i % 100 == 0:
                 balance_history.append(current_balance)
+                # Calculate running RTP
+                spins_so_far = i + 1
+                bet_so_far = spins_so_far * total_bet
+                current_rtp = total_win_amount / bet_so_far
+                rtp_history.append(current_rtp)
             
             if current_spin_win > 0:
                 hits_count += 1
@@ -341,7 +347,8 @@ class SlotMachine:
             'symbol_hits': final_symbol_hits,
             'symbol_win_amounts': final_symbol_win_amounts,
             'win_distribution': dict(win_dist),
-            'balance_history': [float(b) for b in balance_history]
+            'balance_history': [float(b) for b in balance_history],
+            'rtp_history': [float(r) for r in rtp_history]
         }
 
 if __name__ == "__main__":

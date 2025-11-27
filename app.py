@@ -3,7 +3,7 @@ import os
 import tempfile
 from slot_machine import SlotMachine
 
-app = Flask(__name__, template_folder='.')
+app = Flask(__name__)
 
 @app.route('/')
 def index():
@@ -79,4 +79,5 @@ def run_simulation():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # host='0.0.0.0' allows access from other computers in the same network
+    app.run(debug=True, host='0.0.0.0', port=5000)
