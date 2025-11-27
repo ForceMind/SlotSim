@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slot Machine Simulation (JS Version)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS for reading Excel files -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { padding-top: 20px; background-color: #f8f9fa; }
+        .card { margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .stat-value { font-size: 1.5rem; font-weight: bold; color: #0d6efd; }
+        .stat-label { color: #6c757d; font-size: 0.9rem; }
+        #loading { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4 text-center">Slot Machine Simulation Tool (Client-Side)</h1>
+        
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-end">
+                    <div class="col-md-4">
+                        <label for="configFiles" class="form-label">配置文件 (Upload Excel Files)</label>
+                        <input type="file" class="form-control" id="configFiles" multiple accept=".xlsx">
+                        <div class="form-text" style="font-size: 0.7rem;">Select Payout, SlotNormal, WinLine, (Optional) SlotFree</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="wildId" class="form-label">百搭ID (Wild)</label>
+                        <input type="number" class="form-control" id="wildId" placeholder="e.g. 11">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="numSpins" class="form-label">模拟次数 (Spins)</label>
+                        <input type="number" class="form-control" id="numSpins" value="100000" min="1000" max="1000000">
+                    </div>
+                    <div class="col-md-3">
+                        <button id="runBtn" class="btn btn-primary w-100">开始模拟 (Run)</button>
+                    </div>
+                </div>
+                
+                <!-- Advanced Options -->
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <a class="btn btn-link p-0 text-decoration-none" data-bs-toggle="collapse" href="#advancedOptions" role="button">
+                            ▼ 高级选项 (Advanced Options: Free Spins & Strategy)
+                        </a>
+                    </div>
+                </div>
+                <div class="collapse mt-2" id="advancedOptions">
+                    <div class="card card-body bg-light">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <h6>免费游戏配置 (Free Spins Config)</h6>
+                                <div class="mb-2">
+                                    <label class="form-label small">Scatter 图标 ID</label>
+                                    <input type="number" class="form-control form-control-sm" id="scatterId" placeholder="e.g. 1">
+                                </div>
+                                <div class="row">
+                                    <div class="col-6">
+                                        <label class="form-label small">触发数量 (Trigger Count)</label>
+                                        <input type="number" class="form-control form-control-sm" id="fsTrigger" value="3">
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label small">奖励次数 (Award Spins)</label>
+                                        <input type="number" class="form-control form-control-sm" id="fsAward" value="10">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6>策略控制 (Strategy)</h6>
+                                <div class="mb-2">
+                                    <label class="form-label small">最大连输次数 (保底机制)</label>
+                                    <input type="number" class="form-control form-control-sm" id="pityStreak" value="0" placeholder="0 = Disabled">
+                                    <div class="form-text" style="font-size: 0.7rem;">连输 N 把后强制赢 (Force win after N losses).</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading" class="text-center my-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">正在模拟中，请稍候... (Simulating...)</p>
+            <p class="text-muted small">Running in browser, large simulations may take a few seconds.</p>
+        </div>
+
+        <div id="results" style="display: none;">
+            <!-- Key Metrics -->
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">RTP (玩家回报率)</div>
+                            <div class="stat-value" id="rtp">--%</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">Hit Rate (中奖率)</div>
+                            <div class="stat-value" id="hitRate">--%</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">Volatility (波动率/标准差)</div>
+                            <div class="stat-value" id="volatility">--</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">Max Win (最大赢分)</div>
+                            <div class="stat-value" id="maxWin">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced Metrics -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">Free Spin Hit Rate (免费游戏触发率)</div>
+                            <div class="stat-value" id="fsHitRate">--%</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-label">Pity Triggers (保底触发次数)</div>
+                            <div class="stat-value" id="pityTriggers">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">95% Confidence Interval for RTP</h5>
+                            <p class="card-text text-center" id="ciText">--</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Balance History (资金曲线)</h5>
+                            <canvas id="balanceChart" style="max-height: 300px;"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Win Distribution (中奖分布)</h5>
+                            <div style="height: 300px;">
+                                <canvas id="winDistChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Symbol Win Contribution (图标赢分贡献)</h5>
+                            <div style="height: 300px;">
+                                <canvas id="symbolWinChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Table -->
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Symbol Statistics (图标详细统计)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Symbol ID</th>
+                                    <th>Hits 3x</th>
+                                    <th>Hits 4x</th>
+                                    <th>Hits 5x</th>
+                                    <th>Total Win (总赢分)</th>
+                                    <th>% of Total Win</th>
+                                </tr>
+                            </thead>
+                            <tbody id="symbolTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Slot Machine Logic (Ported from Python) ---
+        class SlotMachine {
+            constructor(wildId) {
+                this.payoutTable = {};
+                this.reels = [];
+                this.reelWeights = [];
+                this.totalWeights = [];
+                this.freeReels = [];
+                this.freeReelWeights = [];
+                this.freeTotalWeights = [];
+                this.winLines = [];
+                this.numReels = 5;
+                this.numRows = 3;
+                this.numWinLines = 0;
+                this.wildId = wildId;
+            }
+
+            async loadData(files) {
+                // files: { payout: File, reel: File, line: File, freeReel: File }
+                
+                const readExcel = (file) => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                            // header: 1 returns array of arrays
+                            const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                            resolve(jsonData);
+                        };
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                };
+
+                // 1. Load WinLines
+                const lineData = await readExcel(files.line);
+                // Python: header=1 (row 0 ignored, row 1 header). Data starts row 2.
+                // JS array: index 0 is row 1, index 1 is row 2.
+                // We need to find the header row. Let's assume standard format or search for "Line".
+                let headerIdx = -1;
+                for(let i=0; i<Math.min(5, lineData.length); i++) {
+                    if(lineData[i] && lineData[i].includes('Line')) {
+                        headerIdx = i;
+                        break;
+                    }
+                }
+                if (headerIdx === -1) throw new Error("Invalid WinLine file: 'Line' column not found.");
+                
+                for(let i = headerIdx + 1; i < lineData.length; i++) {
+                    const row = lineData[i];
+                    if(!row || row.length === 0) continue;
+                    // Find 'Line' column index
+                    const lineColIdx = lineData[headerIdx].indexOf('Line');
+                    const lineStr = String(row[lineColIdx]);
+                    try {
+                        const indices = lineStr.split(',').map(x => parseInt(x.trim()));
+                        if(indices.length === this.numReels) {
+                            this.winLines.push(indices);
+                        }
+                    } catch(e) {}
+                }
+                this.numWinLines = this.winLines.length;
+                if(this.numWinLines === 0) throw new Error("No valid win lines found.");
+
+                // 2. Load Payout
+                const payoutData = await readExcel(files.payout);
+                headerIdx = -1;
+                for(let i=0; i<Math.min(5, payoutData.length); i++) {
+                    if(payoutData[i] && payoutData[i].includes('Id')) {
+                        headerIdx = i;
+                        break;
+                    }
+                }
+                if (headerIdx === -1) throw new Error("Invalid Payout file: 'Id' column not found.");
+                
+                const headers = payoutData[headerIdx];
+                const idIdx = headers.indexOf('Id');
+                
+                for(let i = headerIdx + 1; i < payoutData.length; i++) {
+                    const row = payoutData[i];
+                    if(!row || row.length === 0) continue;
+                    
+                    const symId = parseInt(row[idIdx]);
+                    if(isNaN(symId)) continue;
+                    
+                    if(!this.payoutTable[symId]) this.payoutTable[symId] = {};
+                    
+                    for(let count=2; count<=5; count++) {
+                        const colName = `Payout${count}`;
+                        const colIdx = headers.indexOf(colName);
+                        if(colIdx !== -1) {
+                            const val = parseFloat(row[colIdx]);
+                            if(!isNaN(val)) {
+                                this.payoutTable[symId][count] = val / this.numWinLines;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Load Reels
+                await this._loadReels(files.reel, this.reels, this.reelWeights, this.totalWeights, readExcel);
+                
+                // 4. Load Free Reels
+                if(files.freeReel) {
+                    await this._loadReels(files.freeReel, this.freeReels, this.freeReelWeights, this.freeTotalWeights, readExcel);
+                }
+            }
+
+            async _loadReels(file, reelsList, weightsList, totalWeightsList, readExcelFn) {
+                const data = await readExcelFn(file);
+                let headerIdx = -1;
+                for(let i=0; i<Math.min(5, data.length); i++) {
+                    if(data[i] && data[i].includes('Reels1')) {
+                        headerIdx = i;
+                        break;
+                    }
+                }
+                if (headerIdx === -1) throw new Error("Invalid Reel file: 'Reels1' column not found.");
+                
+                const headers = data[headerIdx];
+                
+                for(let r=1; r<=this.numReels; r++) {
+                    const reelCol = `Reels${r}`;
+                    const weightCol = `&Weight${r}`;
+                    const rIdx = headers.indexOf(reelCol);
+                    const wIdx = headers.indexOf(weightCol);
+                    
+                    if(rIdx === -1) break;
+                    
+                    const symbols = [];
+                    const weights = [];
+                    let totalW = 0;
+                    
+                    for(let i = headerIdx + 1; i < data.length; i++) {
+                        const row = data[i];
+                        if(!row) continue;
+                        
+                        const sym = parseInt(row[rIdx]);
+                        const w = parseInt(row[wIdx]);
+                        
+                        if(!isNaN(sym) && !isNaN(w)) {
+                            symbols.push(sym);
+                            weights.push(w);
+                            totalW += w;
+                        }
+                    }
+                    
+                    reelsList.push(symbols);
+                    weightsList.push(weights);
+                    totalWeightsList.push(totalW);
+                }
+            }
+
+            spin(useFreeReels = false) {
+                const stops = [];
+                const screen = Array(this.numRows).fill(0).map(() => Array(this.numReels).fill(0));
+                
+                const currentReels = (useFreeReels && this.freeReels.length > 0) ? this.freeReels : this.reels;
+                const currentWeights = (useFreeReels && this.freeReels.length > 0) ? this.freeReelWeights : this.reelWeights;
+                const currentTotals = (useFreeReels && this.freeReels.length > 0) ? this.freeTotalWeights : this.totalWeights;
+                
+                for(let i=0; i<this.numReels; i++) {
+                    const r = Math.random() * currentTotals[i];
+                    let currentW = 0;
+                    let stopIdx = 0;
+                    
+                    for(let idx=0; idx<currentWeights[i].length; idx++) {
+                        currentW += currentWeights[i][idx];
+                        if(r < currentW) {
+                            stopIdx = idx;
+                            break;
+                        }
+                    }
+                    stops.push(stopIdx);
+                    
+                    const reelLen = currentReels[i].length;
+                    for(let row=0; row<this.numRows; row++) {
+                        const symIdx = (stopIdx + row) % reelLen;
+                        screen[row][i] = currentReels[i][symIdx];
+                    }
+                }
+                return { screen, stops };
+            }
+
+            checkWin(screen) {
+                let totalWin = 0.0;
+                const winDetails = [];
+                
+                for(let lineIdx=0; lineIdx<this.winLines.length; lineIdx++) {
+                    const lineIndices = this.winLines[lineIdx];
+                    const lineSymbols = [];
+                    
+                    for(let col=0; col<lineIndices.length; col++) {
+                        const row = lineIndices[col];
+                        if(row >= 0 && row < this.numRows) {
+                            lineSymbols.push(screen[row][col]);
+                        } else {
+                            lineSymbols.push(-1);
+                        }
+                    }
+                    
+                    if(lineSymbols.length === 0) continue;
+                    
+                    let matchSymbol = -1;
+                    if(this.wildId !== null && !isNaN(this.wildId)) {
+                        for(let s of lineSymbols) {
+                            if(s !== this.wildId) {
+                                matchSymbol = s;
+                                break;
+                            }
+                        }
+                        if(matchSymbol === -1) matchSymbol = this.wildId;
+                    } else {
+                        matchSymbol = lineSymbols[0];
+                    }
+                    
+                    let count = 0;
+                    for(let s of lineSymbols) {
+                        if(s === matchSymbol || (this.wildId !== null && s === this.wildId)) {
+                            count++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if(this.payoutTable[matchSymbol]) {
+                        const payouts = this.payoutTable[matchSymbol];
+                        if(payouts[count] && payouts[count] > 0) {
+                            const winAmount = payouts[count];
+                            totalWin += winAmount;
+                            winDetails.push({
+                                lineIndex: lineIdx,
+                                symbol: matchSymbol,
+                                count: count,
+                                win: winAmount
+                            });
+                        }
+                    }
+                }
+                return { totalWin, winDetails };
+            }
+
+            runSimulation(numSpins, totalBet, scatterId, fsTriggerCount, fsAwardCount, pityStreakThreshold) {
+                let totalWinAmount = 0.0;
+                const symbolHitCounts = {}; // { sym: { 3: c, 4: c... } }
+                const symbolWinAmounts = {};
+                const winDist = {};
+                
+                let hitsCount = 0;
+                let maxWin = 0.0;
+                const winAmounts = [];
+                const balanceHistory = [];
+                const rtpHistory = [];
+                let currentBalance = 0.0;
+                
+                let currentLosingStreak = 0;
+                let pityActivationsCount = 0;
+                let fsTriggersCount = 0;
+                
+                // Initialize stats containers
+                const initSymStats = (sym) => {
+                    if(!symbolHitCounts[sym]) symbolHitCounts[sym] = {3:0, 4:0, 5:0};
+                    if(!symbolWinAmounts[sym]) symbolWinAmounts[sym] = 0;
+                };
+
+                for(let i=0; i<numSpins; i++) {
+                    let forceWin = false;
+                    if(pityStreakThreshold > 0 && currentLosingStreak >= pityStreakThreshold) {
+                        forceWin = true;
+                        pityActivationsCount++;
+                    }
+                    
+                    let screen, winMultiplier, details;
+                    let currentSpinWin = 0;
+                    
+                    while(true) {
+                        const res = this.spin(false);
+                        screen = res.screen;
+                        const winRes = this.checkWin(screen);
+                        winMultiplier = winRes.totalWin;
+                        details = winRes.winDetails;
+                        
+                        let fsTotalWin = 0.0;
+                        let fsTriggered = false;
+                        
+                        if(scatterId !== null && !isNaN(scatterId)) {
+                            let scatterCount = 0;
+                            for(let r=0; r<this.numRows; r++) {
+                                for(let c=0; c<this.numReels; c++) {
+                                    if(screen[r][c] === scatterId) scatterCount++;
+                                }
+                            }
+                            
+                            if(scatterCount >= fsTriggerCount) {
+                                fsTriggered = true;
+                                fsTriggersCount++;
+                                let fsLeft = fsAwardCount;
+                                while(fsLeft > 0) {
+                                    const fsRes = this.spin(true);
+                                    const fsWinRes = this.checkWin(fsRes.screen);
+                                    fsTotalWin += fsWinRes.totalWin * totalBet;
+                                    
+                                    fsWinRes.winDetails.forEach(d => {
+                                        initSymStats(d.symbol);
+                                        symbolHitCounts[d.symbol][d.count]++;
+                                        symbolWinAmounts[d.symbol] += d.win * totalBet;
+                                    });
+                                    fsLeft--;
+                                }
+                            }
+                        }
+                        
+                        currentSpinWin = (winMultiplier * totalBet) + fsTotalWin;
+                        
+                        if(forceWin) {
+                            if(currentSpinWin > 0) break;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if(currentSpinWin > 0) {
+                        currentLosingStreak = 0;
+                    } else {
+                        currentLosingStreak++;
+                    }
+                    
+                    totalWinAmount += currentSpinWin;
+                    winAmounts.push(currentSpinWin);
+                    currentBalance = currentBalance - totalBet + currentSpinWin;
+                    
+                    if(i % 100 === 0) {
+                        balanceHistory.push(currentBalance);
+                        const spinsSoFar = i + 1;
+                        const betSoFar = spinsSoFar * totalBet;
+                        rtpHistory.push(totalWinAmount / betSoFar);
+                    }
+                    
+                    if(currentSpinWin > 0) {
+                        hitsCount++;
+                        if(currentSpinWin > maxWin) maxWin = currentSpinWin;
+                        
+                        const winRatio = currentSpinWin / totalBet;
+                        let bucket = "";
+                        if (winRatio < 1) bucket = "< 1x Bet";
+                        else if (winRatio < 5) bucket = "1x - 5x Bet";
+                        else if (winRatio < 10) bucket = "5x - 10x Bet";
+                        else if (winRatio < 20) bucket = "10x - 20x Bet";
+                        else if (winRatio < 50) bucket = "20x - 50x Bet";
+                        else if (winRatio < 100) bucket = "50x - 100x Bet";
+                        else bucket = "100x+ Bet";
+                        
+                        if(!winDist[bucket]) winDist[bucket] = 0;
+                        winDist[bucket]++;
+                        
+                        details.forEach(d => {
+                            initSymStats(d.symbol);
+                            symbolHitCounts[d.symbol][d.count]++;
+                            symbolWinAmounts[d.symbol] += d.win * totalBet;
+                        });
+                    }
+                }
+                
+                const rtp = totalWinAmount / (numSpins * totalBet);
+                const hitRate = hitsCount / numSpins;
+                const fsHitRate = numSpins > 0 ? fsTriggersCount / numSpins : 0;
+                
+                // Volatility (StdDev of multipliers)
+                const multipliers = winAmounts.map(w => w / totalBet);
+                const mean = multipliers.reduce((a,b)=>a+b,0) / multipliers.length;
+                const variance = multipliers.reduce((a,b)=>a + Math.pow(b-mean, 2), 0) / multipliers.length;
+                const volatility = Math.sqrt(variance);
+                
+                const marginOfError = 1.96 * (volatility / Math.sqrt(numSpins));
+                
+                return {
+                    rtp: rtp,
+                    total_win: totalWinAmount,
+                    total_bet: numSpins * totalBet,
+                    total_spins: numSpins,
+                    hit_rate: hitRate,
+                    fs_hit_rate: fsHitRate,
+                    pity_triggers: pityActivationsCount,
+                    max_win: maxWin,
+                    volatility: volatility,
+                    ci_95: [rtp - marginOfError, rtp + marginOfError],
+                    symbol_hits: symbolHitCounts,
+                    symbol_win_amounts: symbolWinAmounts,
+                    win_distribution: winDist,
+                    balance_history: balanceHistory,
+                    rtp_history: rtpHistory
+                };
+            }
+        }
+
+        // --- UI Logic ---
+        let winDistChart = null;
+        let symbolWinChart = null;
+        let balanceChart = null;
+
+        document.getElementById('runBtn').addEventListener('click', async () => {
+            const numSpins = parseInt(document.getElementById('numSpins').value);
+            const wildIdVal = document.getElementById('wildId').value;
+            const wildId = wildIdVal ? parseInt(wildIdVal) : null;
+            const fileInput = document.getElementById('configFiles');
+            
+            // Advanced
+            const scatterIdVal = document.getElementById('scatterId').value;
+            const scatterId = scatterIdVal ? parseInt(scatterIdVal) : null;
+            const fsTrigger = parseInt(document.getElementById('fsTrigger').value);
+            const fsAward = parseInt(document.getElementById('fsAward').value);
+            const pityStreak = parseInt(document.getElementById('pityStreak').value);
+            
+            if (fileInput.files.length === 0) {
+                alert("请选择配置文件 (Please select Payout, SlotNormal, WinLine files).");
+                return;
+            }
+            
+            // Identify files
+            const files = {};
+            for(let f of fileInput.files) {
+                if(f.name.includes('Payout')) files.payout = f;
+                else if(f.name.includes('SlotNormal')) files.reel = f;
+                else if(f.name.includes('WinLine')) files.line = f;
+                else if(f.name.includes('SlotFree')) files.freeReel = f;
+            }
+            
+            if(!files.payout || !files.reel || !files.line) {
+                alert("Missing required files. Please upload Payout, SlotNormal, and WinLine.");
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('runBtn').disabled = true;
+
+            // Use setTimeout to allow UI to update before heavy processing
+            setTimeout(async () => {
+                try {
+                    const sim = new SlotMachine(wildId);
+                    await sim.loadData(files);
+                    
+                    const results = sim.runSimulation(
+                        numSpins, 
+                        100.0, // Total Bet
+                        scatterId, 
+                        fsTrigger, 
+                        fsAward, 
+                        pityStreak
+                    );
+                    
+                    displayResults(results);
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Error: ' + error.message);
+                } finally {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('runBtn').disabled = false;
+                }
+            }, 100);
+        });
+
+        function displayResults(data) {
+            document.getElementById('results').style.display = 'block';
+            
+            // Key Metrics
+            document.getElementById('rtp').textContent = (data.rtp * 100).toFixed(2) + '%';
+            document.getElementById('hitRate').textContent = (data.hit_rate * 100).toFixed(2) + '%';
+            document.getElementById('volatility').textContent = data.volatility.toFixed(4);
+            document.getElementById('maxWin').textContent = data.max_win.toFixed(2);
+            
+            // Advanced Metrics
+            const fsRate = (data.fs_hit_rate * 100).toFixed(4) + '%';
+            document.getElementById('fsHitRate').textContent = fsRate;
+            document.getElementById('pityTriggers').textContent = data.pity_triggers;
+
+            const ciLower = (data.ci_95[0] * 100).toFixed(2);
+            const ciUpper = (data.ci_95[1] * 100).toFixed(2);
+            document.getElementById('ciText').textContent = `[ ${ciLower}% , ${ciUpper}% ]`;
+
+            // Charts
+            updateCharts(data);
+
+            // Table
+            const tbody = document.getElementById('symbolTableBody');
+            tbody.innerHTML = '';
+            
+            const sortedSyms = Object.keys(data.symbol_hits).sort((a, b) => parseInt(a) - parseInt(b));
+            
+            sortedSyms.forEach(sym => {
+                const hitsDict = data.symbol_hits[sym];
+                const h3 = hitsDict['3'] || 0;
+                const h4 = hitsDict['4'] || 0;
+                const h5 = hitsDict['5'] || 0;
+                const win = data.symbol_win_amounts[sym];
+                const pct = data.total_win > 0 ? (win / data.total_win * 100) : 0;
+                
+                const row = `<tr>
+                    <td>${sym}</td>
+                    <td>${h3}</td>
+                    <td>${h4}</td>
+                    <td>${h5}</td>
+                    <td>${win.toFixed(2)}</td>
+                    <td>${pct.toFixed(2)}%</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
+        }
+
+        function updateCharts(data) {
+            // Win Distribution Chart
+            const distLabels = ["< 1x Bet", "1x - 5x Bet", "5x - 10x Bet", "10x - 20x Bet", "20x - 50x Bet", "50x - 100x Bet", "100x+ Bet"];
+            const distData = distLabels.map(label => data.win_distribution[label] || 0);
+            
+            const ctxDist = document.getElementById('winDistChart').getContext('2d');
+            if (winDistChart) winDistChart.destroy();
+            
+            winDistChart = new Chart(ctxDist, {
+                type: 'bar',
+                data: {
+                    labels: distLabels,
+                    datasets: [{
+                        label: 'Count',
+                        data: distData,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // Symbol Win Chart
+            const symLabels = Object.keys(data.symbol_win_amounts).sort((a, b) => parseInt(a) - parseInt(b));
+            const symData = symLabels.map(sym => data.symbol_win_amounts[sym]);
+            
+            const ctxSym = document.getElementById('symbolWinChart').getContext('2d');
+            if (symbolWinChart) symbolWinChart.destroy();
+            
+            symbolWinChart = new Chart(ctxSym, {
+                type: 'pie',
+                data: {
+                    labels: symLabels.map(s => 'ID ' + s),
+                    datasets: [{
+                        data: symData,
+                        backgroundColor: [
+                            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', 
+                            '#FF9F40', '#C9CBCF', '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+            
+            // Balance History Chart
+            const ctxBalance = document.getElementById('balanceChart').getContext('2d');
+            if (balanceChart) balanceChart.destroy();
+            
+            // Downsample if too many points (max 1000 points)
+            let balanceData = data.balance_history;
+            let rtpData = data.rtp_history || [];
+            let labels = balanceData.map((_, i) => i);
+            
+            if (balanceData.length > 1000) {
+                const step = Math.ceil(balanceData.length / 1000);
+                balanceData = balanceData.filter((_, i) => i % step === 0);
+                rtpData = rtpData.filter((_, i) => i % step === 0);
+                labels = labels.filter((_, i) => i % step === 0);
+            }
+            
+            balanceChart = new Chart(ctxBalance, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Balance (资金)',
+                            data: balanceData,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Actual RTP (实际回报率)',
+                            data: rtpData,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: { display: true },
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        x: { display: true, title: { display: true, text: 'Spin #' } },
+                        y: { 
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Balance' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'RTP' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

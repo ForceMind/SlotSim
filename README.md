@@ -16,24 +16,15 @@
 
 ## 环境要求
 
-*   Python 3.8+
-*   依赖库: `flask`, `pandas`, `openpyxl`, `numpy`
-
-安装依赖:
-```bash
-pip install flask pandas openpyxl numpy
-```
+*   现代浏览器 (Chrome, Edge, Firefox 等)
+*   无需安装 Python 或其他后端环境
 
 ## 使用方法
 
-1.  **启动服务器**:
-    ```bash
-    python app.py
-    ```
-2.  **访问网页**:
-    打开浏览器访问 `http://127.0.0.1:5000`。
+1.  **打开工具**:
+    直接双击根目录下的 `index.html` 文件，或者将其拖入浏览器中。
 
-3.  **上传配置文件**:
+2.  **上传配置文件**:
     点击 "Choose Files" 上传以下 Excel 文件（文件名需包含关键字）：
     *   `Payout.xlsx`: 赔率表 (包含 `Id`, `Payout2`...`Payout5` 列)。
     *   `SlotNormal.xlsx`: 普通游戏卷轴 (包含 `Reels1`, `&Weight1`... 等列)。
