@@ -1,1 +1,62 @@
-# SlotSim
+# Slot Machine Simulation Tool (老虎机模拟工具)
+
+这是一个基于 Web 的老虎机数值模拟工具，用于验证数学模型、计算 RTP（玩家回报率）、波动率，并模拟游戏策略。
+
+## 功能特点
+
+*   **核心模拟**: 支持基于 Excel 配置文件的卷轴模拟。
+*   **数据分析**: 自动计算 RTP、命中率 (Hit Rate)、波动率 (Volatility) 和 95% 置信区间。
+*   **可视化图表**:
+    *   **Win Distribution**: 赢分倍数分布图。
+    *   **Symbol Contribution**: 各图标赢分贡献占比。
+    *   **Balance History**: 资金曲线图，展示模拟过程中的盈亏趋势。
+*   **高级功能**:
+    *   **Free Spins**: 支持独立的免费游戏卷轴和触发机制（Scatter 触发）。
+    *   **策略模拟 (保底机制)**: 支持设置“连输 N 把后强制赢”的保底逻辑 (Pity System)。
+
+## 环境要求
+
+*   Python 3.8+
+*   依赖库: `flask`, `pandas`, `openpyxl`, `numpy`
+
+安装依赖:
+```bash
+pip install flask pandas openpyxl numpy
+```
+
+## 使用方法
+
+1.  **启动服务器**:
+    ```bash
+    python app.py
+    ```
+2.  **访问网页**:
+    打开浏览器访问 `http://127.0.0.1:5000`。
+
+3.  **上传配置文件**:
+    点击 "Choose Files" 上传以下 Excel 文件（文件名需包含关键字）：
+    *   `Payout.xlsx`: 赔率表 (包含 `Id`, `Payout2`...`Payout5` 列)。
+    *   `SlotNormal.xlsx`: 普通游戏卷轴 (包含 `Reels1`, `&Weight1`... 等列)。
+    *   `WinLine.xlsx`: 中奖线配置 (包含 `Line` 列，格式如 `0,0,0,0,0`)。
+    *   *(可选)* `SlotFree.xlsx`: 免费游戏卷轴。
+
+4.  **设置参数**:
+    *   **模拟次数**: 建议 100,000 次以上以获得稳定结果。
+    *   **Wild ID**: 百搭图标的 ID。
+    *   **高级选项**: 点击展开，设置 Scatter ID、免费游戏触发条件以及保底策略。
+
+5.  **查看结果**:
+    点击 "开始模拟"，等待片刻即可查看详细的数据报告和图表。
+
+## 必赢策略 (Pity System) 说明
+
+在“高级选项”中可以设置 **Max Losing Streak (Pity System)**。
+*   如果设置为 `0`，则禁用此功能。
+*   如果设置为 `N` (例如 10)，则当玩家连续输掉 `N` 把后，第 `N+1` 把系统会强制重转，直到产生赢分为止。这用于模拟游戏中的保底机制或“吃分期/吐分期”控制。
+
+## 文件格式说明
+
+请参考 `示例卷轴/` 文件夹中的 Excel 文件格式。
+*   **Payout**: 第一行是说明，第二行是表头。
+*   **Reels**: 支持权重配置 (`&Weight`)。
+*   **WinLine**: 定义 5 列的行号索引 (0-2)。

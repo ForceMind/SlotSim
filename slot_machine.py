@@ -4,20 +4,23 @@ import numpy as np
 from collections import defaultdict
 
 class SlotMachine:
-    def __init__(self, payout_path, reel_path, line_path, wild_id=None):
+    def __init__(self, payout_path, reel_path, line_path, wild_id=None, free_spin_reel_path=None):
         self.payout_table = {}
         self.reels = []
         self.reel_weights = []
         self.total_weights = []
+        self.free_reels = []
+        self.free_reel_weights = []
+        self.free_total_weights = []
         self.win_lines = []
         self.num_reels = 5
         self.num_rows = 3
         self.num_win_lines = 0
         self.wild_id = wild_id
         
-        self._load_data(payout_path, reel_path, line_path)
+        self._load_data(payout_path, reel_path, line_path, free_spin_reel_path)
 
-    def _load_data(self, payout_path, reel_path, line_path):
+    def _load_data(self, payout_path, reel_path, line_path, free_spin_reel_path=None):
         # 3. Load WinLines first to get count
         df_lines = pd.read_excel(line_path, header=1)
         # Columns: Id, Line
@@ -52,8 +55,15 @@ class SlotMachine:
             except ValueError:
                 continue
 
-        # 2. Load Reels
-        df_reels = pd.read_excel(reel_path, header=1)
+        # 2. Load Reels (Normal)
+        self._load_reels(reel_path, self.reels, self.reel_weights, self.total_weights)
+        
+        # 4. Load Free Spin Reels (Optional)
+        if free_spin_reel_path:
+            self._load_reels(free_spin_reel_path, self.free_reels, self.free_reel_weights, self.free_total_weights)
+
+    def _load_reels(self, path, reels_list, weights_list, total_weights_list):
+        df_reels = pd.read_excel(path, header=1)
         # Columns: Reels1, &Weight1, Reels2, &Weight2, ...
         for i in range(1, self.num_reels + 1):
             reel_col = f'Reels{i}'
@@ -68,30 +78,25 @@ class SlotMachine:
             symbols = reel_data[reel_col].astype(int).tolist()
             weights = reel_data[weight_col].astype(int).tolist()
             
-            self.reels.append(symbols)
-            self.reel_weights.append(weights)
-            self.total_weights.append(sum(weights))
+            reels_list.append(symbols)
+            weights_list.append(weights)
+            total_weights_list.append(sum(weights))
 
-        # 3. Load WinLines (Already done)
-        pass
-
-    def spin(self):
+    def spin(self, use_free_reels=False):
         # Generate stop positions for each reel
         stops = []
         screen = np.zeros((self.num_rows, self.num_reels), dtype=int)
         
+        current_reels = self.free_reels if use_free_reels and self.free_reels else self.reels
+        current_weights = self.free_reel_weights if use_free_reels and self.free_reels else self.reel_weights
+        current_totals = self.free_total_weights if use_free_reels and self.free_reels else self.total_weights
+        
         for i in range(self.num_reels):
             # Weighted random selection
-            # random.choices is available in Python 3.6+, but for performance with large lists, 
-            # bisect on cumulative weights is faster, or just random.choices if not too huge.
-            # Given the context, random.choices is likely fine, but let's optimize slightly.
-            # Actually, random.choices returns the element. We need the index to get the window.
-            
-            # Let's use random.random() * total_weight and find index
-            r = random.uniform(0, self.total_weights[i])
+            r = random.uniform(0, current_totals[i])
             current_w = 0
             stop_idx = 0
-            for idx, w in enumerate(self.reel_weights[i]):
+            for idx, w in enumerate(current_weights[i]):
                 current_w += w
                 if r < current_w:
                     stop_idx = idx
@@ -100,11 +105,11 @@ class SlotMachine:
             stops.append(stop_idx)
             
             # Fill screen column
-            reel_len = len(self.reels[i])
+            reel_len = len(current_reels[i])
             for row in range(self.num_rows):
                 # Wrap around
                 symbol_idx = (stop_idx + row) % reel_len
-                screen[row, i] = self.reels[i][symbol_idx]
+                screen[row, i] = current_reels[i][symbol_idx]
                 
         return screen, stops
 
@@ -176,7 +181,9 @@ class SlotMachine:
                     
         return total_win, win_details
 
-    def run_simulation(self, num_spins=100000, total_bet=100.0):
+    def run_simulation(self, num_spins=100000, total_bet=100.0, 
+                       scatter_id=None, fs_trigger_count=3, fs_award_count=10,
+                       pity_streak_threshold=0):
         # total_bet is the amount bet per spin.
         # The payout table values (self.payout_table) are currently normalized to Bet=1.
         # So we need to multiply win by total_bet.
@@ -193,32 +200,85 @@ class SlotMachine:
         max_win = 0.0
         
         win_amounts = []
+        balance_history = [] # Track balance over time (assuming starting balance 0)
+        current_balance = 0.0
+        
+        # Strategy State
+        current_losing_streak = 0
+        pity_activations_count = 0
+        fs_triggers_count = 0
         
         print_interval = num_spins // 10
         if print_interval == 0: print_interval = 1
         
         for i in range(num_spins):
-            screen, _ = self.spin()
-            win_multiplier, details = self.check_win(screen)
+            # Pity System Intervention
+            force_win = False
+            if pity_streak_threshold > 0 and current_losing_streak >= pity_streak_threshold:
+                force_win = True
+                pity_activations_count += 1
             
-            # Scale win by total bet
-            current_spin_win = win_multiplier * total_bet
+            # Spin Loop (usually once, unless forced win)
+            while True:
+                screen, _ = self.spin(use_free_reels=False)
+                win_multiplier, details = self.check_win(screen)
+                
+                # Check Free Spins Trigger
+                fs_total_win = 0.0
+                fs_triggered = False
+                if scatter_id is not None:
+                    # Count scatters
+                    scatter_count = np.count_nonzero(screen == scatter_id)
+                    if scatter_count >= fs_trigger_count:
+                        fs_triggered = True
+                        fs_triggers_count += 1
+                        # Run Free Spins
+                        fs_left = fs_award_count
+                        while fs_left > 0:
+                            fs_screen, _ = self.spin(use_free_reels=True)
+                            fs_win_mult, fs_details = self.check_win(fs_screen)
+                            fs_total_win += fs_win_mult * total_bet
+                            
+                            # Add FS stats
+                            for d in fs_details:
+                                sym = d['symbol']
+                                cnt = d['count']
+                                sym_win = d['win'] * total_bet
+                                symbol_hit_counts[sym][cnt] += 1
+                                symbol_win_amounts[sym] += sym_win
+                            
+                            # Check re-trigger? (Simplified: No re-trigger for now to avoid infinite loops)
+                            fs_left -= 1
+                
+                current_spin_win = (win_multiplier * total_bet) + fs_total_win
+                
+                if force_win:
+                    if current_spin_win > 0:
+                        break # Successfully forced a win
+                    # Else continue loop to re-spin
+                else:
+                    break # Normal spin, exit loop
             
+            # Update Strategy State
+            if current_spin_win > 0:
+                current_losing_streak = 0
+            else:
+                current_losing_streak += 1
+            
+            # Update Totals
             total_win_amount += current_spin_win
             win_amounts.append(current_spin_win)
+            
+            # Update Balance
+            current_balance = current_balance - total_bet + current_spin_win
+            # Record balance every 100 spins to save data size for chart
+            if i % 100 == 0:
+                balance_history.append(current_balance)
             
             if current_spin_win > 0:
                 hits_count += 1
                 if current_spin_win > max_win:
                     max_win = current_spin_win
-                
-                # Categorize win (relative to bet? or absolute?)
-                # User asked for distribution. Usually X times Bet.
-                # But let's use absolute amounts if bet is fixed 100.
-                # Or maybe ranges like 0-Bet, Bet-5Bet, etc.
-                # Let's use multipliers of Total Bet for distribution buckets to be generic,
-                # but label them clearly.
-                # Or just absolute values since Bet is 100.
                 
                 win_ratio = current_spin_win / total_bet
                 if win_ratio < 1: bucket = "< 1x Bet"
@@ -244,6 +304,7 @@ class SlotMachine:
 
         rtp = total_win_amount / (num_spins * total_bet)
         hit_rate = hits_count / num_spins
+        fs_hit_rate = fs_triggers_count / num_spins if num_spins > 0 else 0
         
         std_dev = np.std(win_amounts)
         # Volatility is usually StdDev of Win Multipliers (Win/Bet).
@@ -272,12 +333,15 @@ class SlotMachine:
             'total_bet': float(num_spins * total_bet),
             'total_spins': int(num_spins),
             'hit_rate': float(hit_rate),
+            'fs_hit_rate': float(fs_hit_rate),
+            'pity_triggers': int(pity_activations_count),
             'max_win': float(max_win),
             'volatility': float(volatility_index),
             'ci_95': (float(ci_lower), float(ci_upper)),
             'symbol_hits': final_symbol_hits,
             'symbol_win_amounts': final_symbol_win_amounts,
-            'win_distribution': dict(win_dist)
+            'win_distribution': dict(win_dist),
+            'balance_history': [float(b) for b in balance_history]
         }
 
 if __name__ == "__main__":
