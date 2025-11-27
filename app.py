@@ -3,7 +3,7 @@ import os
 import tempfile
 from slot_machine import SlotMachine
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')
 
 @app.route('/')
 def index():
